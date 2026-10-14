@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>문의함 · 관리자</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+  :root { --paper:#F1F3EF; --card:#fff; --ink:#1A2420; --soft:#4A5852; --jade:#2C5C4F; --line:#C3CFC8; --seal:#A2342A; }
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.6 "Pretendard Variable", Pretendard, -apple-system, "Malgun Gothic", sans-serif; word-break: keep-all; }
+  main { width: min(760px, 100% - 2rem); margin: 0 auto; padding: 2rem 0 4rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 1.5rem; }
+  :focus-visible { outline: 3px solid var(--seal); outline-offset: 2px; }
+  button, input { font: inherit; }
+  .btn { min-height: 48px; padding: 0 1.25rem; border: 0; border-radius: 4px; background: var(--jade); color: #fff; font-weight: 600; cursor: pointer; }
+  #login { display: grid; gap: .75rem; max-width: 360px; }
+  #login label { display: grid; gap: .35rem; font-weight: 600; }
+  #login input { min-height: 48px; padding: 0 1rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .err { color: var(--seal); margin: 0; min-height: 1.6em; }
+  .top { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.5rem; }
+  .count { font-size: 2.5rem; font-weight: 700; line-height: 1; }
+  .count small { display: block; font-size: 1rem; font-weight: 500; color: var(--soft); margin-top: .35rem; }
+  .ghost { background: none; color: var(--jade); border: 1px solid var(--line); }
+  .list { display: grid; gap: .75rem; list-style: none; margin: 0; padding: 0; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; }
+  .item.new { border-left: 4px solid var(--seal); }
+  .meta { color: var(--soft); font-size: .9rem; }
+  .name { font-weight: 700; font-size: 1.1rem; margin: .15rem 0; }
+  .contact { background: none; border: 0; padding: 0; color: var(--jade); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; }
+  .channel { white-space: pre-wrap; margin: .5rem 0 0; }
+  .status { display: flex; gap: .5rem; margin-top: .85rem; flex-wrap: wrap; }
+  .status button { min-height: 44px; padding: 0 .9rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); cursor: pointer; }
+  .status button[aria-pressed="true"] { background: var(--jade); border-color: var(--jade); color: #fff; font-weight: 600; }
+  .empty { color: var(--soft); }
+</style>
+</head>
+<body>
+<main>
+  <h1>문의함</h1>
+
+  <form id="login">
+    <label>관리자 비밀번호
+      <input type="password" id="pw" autocomplete="current-password" required>
+    </label>
+    <button class="btn" type="submit">들어가기</button>
+    <p class="err" id="login-err" role="alert"></p>
+  </form>
+
+  <section id="board" hidden>
+    <div class="top">
+      <p class="count" id="new-count">0<small>새 문의</small></p>
+      <button class="btn ghost" id="reload" type="button">새로고침</button>
+    </div>
+    <p class="err" id="board-err" role="alert"></p>
+    <ul class="list" id="list"></ul>
+  </section>
+</main>
+
+<script>
+(function () {
+  const KEY = 'admin-pw';
+  const STATUSES = ['새 문의', '연락함', '완료'];
+  const $ = (id) => document.getElementById(id);
+  const getPw = () => sessionStorage.getItem(KEY) || '';
+
+  async function api(method, body) {
+    const r = await fetch('/api/admin', {
+      method,
+      headers: { 'x-admin-password': getPw(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { logout('비밀번호가 맞지 않아요.'); throw new Error(''); }
+    if (!r.ok) throw new Error(j.error || '불러오지 못했어요.');
+    return j;
+  }
+
+  function logout(message) {
+    sessionStorage.removeItem(KEY);
+    $('board').hidden = true;
+    $('login').hidden = false;
+    $('login-err').textContent = message || '';
+    $('pw').value = '';
+    $('pw').focus();
+  }
+
+  const fmt = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  function render(rows) {
+    $('new-count').firstChild.nodeValue = rows.filter((r) => r.status === '새 문의').length;
+    const list = $('list');
+    list.textContent = '';
+    if (!rows.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = '아직 들어온 문의가 없어요.';
+      list.append(li);
+      return;
+    }
+    for (const r of rows) {
+      const li = document.createElement('li');
+      li.className = 'item' + (r.status === '새 문의' ? ' new' : '');
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = fmt(r.created_at) + (r.company ? ' · ' + r.company : '');
+
+      const name = document.createElement('p');
+      name.className = 'name';
+      name.textContent = r.name;
+
+      const contact = document.createElement('button');
+      contact.type = 'button';
+      contact.className = 'contact';
+      contact.textContent = r.contact;
+      contact.title = '눌러서 복사';
+      contact.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(r.contact); contact.textContent = r.contact + ' (복사됨)'; }
+        catch { const sel = getSelection(); const range = document.createRange(); range.selectNodeContents(contact); sel.removeAllRanges(); sel.addRange(range); }
+      });
+
+      li.append(meta, name, contact);
+
+      if (r.channel) {
+        const ch = document.createElement('p');
+        ch.className = 'channel';
+        ch.textContent = r.channel;
+        li.append(ch);
+      }
+
+      const st = document.createElement('div');
+      st.className = 'status';
+      for (const s of STATUSES) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = s;
+        b.setAttribute('aria-pressed', String(r.status === s));
+        b.addEventListener('click', async () => {
+          if (r.status === s) return;
+          try { await api('PATCH', { id: r.id, status: s }); load(); }
+          catch (e) { $('board-err').textContent = e.message; }
+        });
+        st.append(b);
+      }
+      li.append(st);
+      list.append(li);
+    }
+  }
+
+  async function load() {
+    $('board-err').textContent = '';
+    try {
+      const j = await api('GET');
+      $('login').hidden = true;
+      $('board').hidden = false;
+      render(j.rows || []);
+    } catch (e) {
+      if (e.message) { $('login').hidden = true; $('board').hidden = false; $('board-err').textContent = e.message; }
+    }
+  }
+
+  $('login').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('pw').value;
+    if (!v) return;
+    sessionStorage.setItem(KEY, v);
+    $('login-err').textContent = '';
+    load();
+  });
+  $('reload').addEventListener('click', load);
+
+  if (getPw()) load(); else $('pw').focus();
+})();
+</script>
+</body>
+</html>
